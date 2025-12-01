@@ -25,6 +25,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
+// Tell other scripts we've loaded the Firebase auth module so mock auth does not attach duplicate handlers
+window.USE_FIREBASE_AUTH = true;
+
 // ========== SIGNUP ==========
 const signupForm = document.getElementById('signupForm');
 if (signupForm) {
@@ -36,8 +39,9 @@ if (signupForm) {
 
         try {
             await createUserWithEmailAndPassword(auth, email, password);
+            // Firebase onAuthStateChanged will handle redirect; but ensure immediate navigation to home
             alert('Signup successful!');
-            window.location.href = 'index.html';
+            window.location.href = 'home.html';
         } catch (err) {
             alert(err.message);
         }
@@ -50,13 +54,17 @@ if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
+        // Support existing page input IDs (`email` / `password`) to avoid mismatch
+        const emailEl = document.getElementById('loginEmail') || document.getElementById('email');
+        const passwordEl = document.getElementById('loginPassword') || document.getElementById('password');
+        const email = emailEl ? emailEl.value : '';
+        const password = passwordEl ? passwordEl.value : '';
 
         try {
             await signInWithEmailAndPassword(auth, email, password);
+            // Navigate to home after successful login
             alert('Login successful!');
-            window.location.href = 'index.html';
+            window.location.href = 'home.html';
         } catch (err) {
             alert(err.message);
         }
@@ -70,7 +78,7 @@ if (logoutBtn) {
         try {
             await signOut(auth);
             alert('Logged out!');
-            window.location.href = 'login.html';
+            window.location.href = 'index.html';
         } catch (err) {
             alert(err.message);
         }
@@ -79,12 +87,67 @@ if (logoutBtn) {
 
 // ========== AUTH STATE ==========
 onAuthStateChanged(auth, (user) => {
+    // Update navigation links when authentication state changes.
+    // The site uses a few different navbar implementations: try to update a couple of places safely.
     const navAuthText = document.getElementById('navAuthText');
-    if (!navAuthText) return;
+    if (navAuthText) {
+        navAuthText.textContent = user ? user.email : 'Login';
+    }
 
-    if (user) {
-        navAuthText.textContent = user.email;
-    } else {
-        navAuthText.textContent = 'Login';
+    // If nav-links exists, update/add a logout link similarly to main.js behavior.
+    const navLinks = document.querySelector('.nav-links');
+    if (navLinks) {
+        const existing = document.querySelector('.auth-link-item');
+        if (existing) existing.remove();
+
+        const authLi = document.createElement('li');
+        authLi.className = 'auth-link-item';
+
+        if (user) {
+            // Show simple logout link
+            authLi.innerHTML = `<a href="#" id="logoutBtn" style="color: var(--color-primary); font-weight: bold;">Logout</a>`;
+            navLinks.appendChild(authLi);
+            // Attach logout handler
+            const logout = document.getElementById('logoutBtn');
+            if (logout) {
+                logout.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    await signOut(auth);
+                    // After sign out, go to auth page
+                    window.location.href = 'index.html';
+                });
+            }
+        } else {
+            if (!window.location.pathname.includes('index.html') && !window.location.pathname.includes('signup.html')) {
+                authLi.innerHTML = `<a href="index.html" style="font-weight: bold;">Login / Sign Up</a>`;
+                navLinks.appendChild(authLi);
+            }
+        }
+    }
+
+    // -----------------
+    // Page protection
+    // -----------------
+    const path = window.location.pathname || window.location.href;
+    const endsWith = (name) => path.endsWith(name) || path.endsWith('/' + name) || path.endsWith('/');
+
+    const isAuthPage = () => {
+        return path.endsWith('index.html') || path.endsWith('/') || path.endsWith('signup.html');
+    };
+
+    const protectedPages = ['home.html', 'services.html', 'countries.html', 'about.html', 'contact.html'];
+    const isProtectedPage = () => protectedPages.some(p => path.endsWith(p));
+
+    // If not authenticated and on a protected page, redirect to auth page
+    if (!user && isProtectedPage()) {
+        // Use replace so back doesn't reveal protected content
+        window.location.replace('index.html');
+        return;
+    }
+
+    // If authenticated and currently on auth page, send to home
+    if (user && isAuthPage()) {
+        window.location.replace('home.html');
+        return;
     }
 });
